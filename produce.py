@@ -4,7 +4,6 @@ import csv
 from ipaddress import IPv4Network, IPv6Network
 import math
 import subprocess
-import sys
 import urllib.request
 
 parser = argparse.ArgumentParser(description='Generate non-China routes for BIRD.')
