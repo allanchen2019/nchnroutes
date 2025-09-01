@@ -3,6 +3,9 @@ import argparse
 import csv
 from ipaddress import IPv4Network, IPv6Network
 import math
+import subprocess
+import sys
+import urllib.request
 
 parser = argparse.ArgumentParser(description='Generate non-China routes for BIRD.')
 parser.add_argument('--exclude', metavar='CIDR', type=str, nargs='*',
@@ -11,8 +14,38 @@ parser.add_argument('--next', default="wg0", metavar = "INTERFACE OR IP",
                     help='next hop for where non-China IP address, this is usually the tunnel interface')
 parser.add_argument('--ipv4-list', choices=['apnic', 'ipip'], default=['apnic', 'ipip'], nargs='*',
                     help='IPv4 lists to use when subtracting China based IP, multiple lists can be used at the same time (default: apnic ipip)')
-
+parser.add_argument('--bird', action='store_true', help='Apply routes to bird (move conf and reload)')
+parser.add_argument('--no-git', action='store_true', help='Skip git pull')
 args = parser.parse_args()
+
+# --- Makefile 操作移植 ---
+def run_git_pull():
+    if args.no_git:
+        print("[SKIP] git pull")
+        return
+    print("[RUN] git pull")
+    subprocess.run(["git", "pull"])
+
+def download_file(url, filename):
+    print(f"[DOWNLOAD] {filename} from {url}")
+    try:
+        urllib.request.urlretrieve(url, filename)
+    except Exception as e:
+        print(f"下载 {filename} 失败: {e}")
+        sys.exit(1)
+
+def main_makefile_steps():
+    run_git_pull()
+    download_file(
+        "https://ftp.apnic.net/stats/apnic/delegated-apnic-latest",
+        "delegated-apnic-latest"
+    )
+    download_file(
+        "https://raw.githubusercontent.com/17mon/china_ip_list/master/china_ip_list.txt",
+        "china_ip_list.txt"
+    )
+
+main_makefile_steps()
 
 class Node:
     def __init__(self, cidr, parent=None):
@@ -126,8 +159,24 @@ subtract_cidr(root, RESERVED)
 # get rid of reserved addresses
 subtract_cidr(root_v6, RESERVED_V6)
 
+
 with open("routes4.conf", "w") as f:
     dump_bird(root, f)
 
 with open("routes6.conf", "w") as f:
     dump_bird(root_v6, f)
+
+# bird 配置操作（可选）
+def bird_config():
+    print("[BIRD] 配置 bird 路由...")
+    try:
+        subprocess.run(["sudo", "mv", "routes4.conf", "/etc/bird/routes4.conf"])
+        subprocess.run(["sudo", "mv", "routes6.conf", "/etc/bird/routes6.conf"])
+        subprocess.run(["sudo", "birdc", "configure"])
+        subprocess.run(["sudo", "birdc6", "configure"])
+    except Exception as e:
+        print(f"bird 配置失败: {e}")
+        sys.exit(1)
+
+if args.bird:
+    bird_config()
